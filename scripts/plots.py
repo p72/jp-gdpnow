@@ -337,9 +337,11 @@ def plot_report(nc, monthly: pd.DataFrame, runs: pd.DataFrame | None, path: str,
     ax.grid(axis="y", color=GRID); ax.set_axisbelow(True)
     ax.spines[["top", "right"]].set_visible(False)
 
-    fig.text(0.085, 0.02, "出所：内閣府ESRI（QE・景気動向指数・機械受注）、日本銀行（実質輸出入・消費活動指数・国際収支）、"
-             "総務省 消費動向指数、経産省 製造工業生産予測指数、国交省 建設総合統計（e-Stat）より作成。モデル推計であり公式見通しではない。"
-             "区間は公表カレンダー再現バックテストの誤差から算出。",
+    fig.text(0.085, 0.032, "出所：内閣府ESRI（QE・景気動向指数・機械受注）、日本銀行（実質輸出入・消費活動指数・国際収支）、"
+             "総務省 消費動向指数、経済産業省 鉱工業指数・製造工業生産予測指数、国土交通省 建設総合統計 を加工して作成。",
+             fontsize=8.5, color=MUTED)
+    fig.text(0.085, 0.01, "個人のモデル推計（公的機関の見通しではない）。区間はバックテスト誤差から算出。"
+             "このサービスは、政府統計総合窓口(e-Stat)のAPI機能を使用していますが、サービスの内容は国によって保証されたものではありません。",
              fontsize=8.5, color=MUTED)
     if watermark:
         fig.text(0.5, 0.5, watermark, fontsize=60, color="#d0d0d0", alpha=0.6,
