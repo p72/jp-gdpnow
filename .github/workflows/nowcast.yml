@@ -1,0 +1,61 @@
+name: nowcast
+
+# 平日 18:30 JST に実行。前回から新しい（または改定された）データがある日だけ
+# 予想を記録し、data/ と output/ をコミットする。手動実行は Actions タブの "Run workflow"。
+on:
+  schedule:
+    - cron: "30 9 * * 1-5"   # 09:30 UTC = 18:30 JST
+  workflow_dispatch:
+    inputs:
+      force:
+        description: "新しいデータが無くても実行して記録する"
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+concurrency:
+  group: nowcast
+  cancel-in-progress: false
+
+jobs:
+  nowcast:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    env:
+      TZ: Asia/Tokyo
+      JP_GDPNOW_HOME: ${{ github.workspace }}/data
+      ESTAT_APP_ID: ${{ secrets.ESTAT_APP_ID }}
+      MPLBACKEND: Agg
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: 日本語フォント
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq fonts-noto-cjk
+
+      - name: 依存パッケージ
+        run: pip install -r requirements.txt
+
+      - name: ナウキャスト
+        run: |
+          FLAG="--only-if-new"
+          if [ "${{ inputs.force }}" = "true" ]; then FLAG=""; fi
+          python -m scripts.cli nowcast $FLAG --out output 2>&1 | tee output/last_run.log
+
+      - name: 結果をコミット
+        run: |
+          git config user.name "jp-gdpnow bot"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add data output
+          if git diff --cached --quiet; then
+            echo "変更なし"
+          else
+            git commit -m "nowcast $(date +%F) (自動実行)"
+            git push
+          fi
