@@ -1,10 +1,13 @@
 name: nowcast
 
-# 平日 18:30 JST に実行。前回から新しい（または改定された）データがある日だけ
-# 予想を記録し、data/ と output/ をコミットする。手動実行は Actions タブの "Run workflow"。
+# 平日 17:07 と 21:43 JST に実行（GitHub の定時実行は混雑で数時間遅れることがあるため、
+# 混みやすい 00分・30分を避け、予備を1本足している）。前回から新しい（または改定された）
+# データがあるときだけ予想を記録し、data/ と output/ をコミットする。2回目は通常スキップ。
+# 手動実行は Actions タブの "Run workflow"。
 on:
   schedule:
-    - cron: "30 9 * * 1-5"   # 09:30 UTC = 18:30 JST
+    - cron: "7 8 * * 1-5"    # 08:07 UTC = 17:07 JST（日銀 16時発表の後）
+    - cron: "43 12 * * 1-5"  # 12:43 UTC = 21:43 JST（予備）
   workflow_dispatch:
     inputs:
       force:
