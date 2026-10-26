@@ -9,6 +9,9 @@ Tables
                                             is new or revised (diff storage)
   runs(run_at, target, model, asof_data, saar, qoq, demand_saar, supply_saar,
        contributions, observed, qe_label)  -- one row per nowcast run
+  news(run_at, target, model, basis, item, contrib)
+                                         -- news decomposition of each logged run vs the
+                                            previous one (basis = "前回 YYYY-MM-DD")
 
 Monthly indicators use series names as in data.get_monthly_raw();
 QE levels are stored as "qe:<column>" with ref_date = quarter start.
@@ -37,6 +40,10 @@ CREATE TABLE IF NOT EXISTS runs (
   saar REAL, qoq REAL, demand_saar REAL, supply_saar REAL,
   contributions TEXT, observed TEXT, qe_label TEXT, factor_saar REAL
 );
+CREATE TABLE IF NOT EXISTS news (
+  run_at TEXT NOT NULL, target TEXT NOT NULL, model TEXT, basis TEXT,
+  item TEXT NOT NULL, contrib REAL
+);
 """
 
 
@@ -55,6 +62,28 @@ def connect(path: str | None = None) -> sqlite3.Connection:
     return con
 
 
+def _stamp(x=None) -> str:
+    """Vintage key. New snapshots are time-stamped ("YYYY-MM-DDTHH:MM:SS", JST in Actions);
+    older ones are plain dates. Keys compare as strings, so both kinds sort correctly."""
+    if x is None:
+        return datetime.now().isoformat(timespec="seconds")
+    if isinstance(x, str) and len(x) == 10:
+        return x
+    if isinstance(x, date) and not isinstance(x, datetime):
+        return x.isoformat()
+    return pd.Timestamp(x).isoformat(timespec="seconds") if not isinstance(x, str) else x
+
+
+def _asof(x) -> str:
+    """'As of' bound: a bare date means the end of that day; a timestamp is used as is."""
+    if isinstance(x, (date,)) and not isinstance(x, (datetime, pd.Timestamp)):
+        return f"{x.isoformat()}T23:59:59"
+    s = str(x)
+    if len(s) == 10:
+        return f"{s}T23:59:59"
+    return pd.Timestamp(s).isoformat(timespec="seconds")
+
+
 def _latest(con, series: str, asof: str) -> dict:
     q = """SELECT ref_date, value FROM obs o WHERE series=? AND vintage = (
              SELECT MAX(vintage) FROM obs i WHERE i.series=o.series
@@ -65,8 +94,8 @@ def _latest(con, series: str, asof: str) -> dict:
 def save_snapshot(df: pd.DataFrame, vintage: str | date | None = None, prefix: str = "",
                   con: sqlite3.Connection | None = None, rtol: float = 1e-9) -> int:
     """Store the columns of `df` (index = ref dates) as published on `vintage`
-    (default today). Only new or changed values are written. Returns rows added."""
-    vintage = str(pd.Timestamp(vintage or date.today()).date())
+    (default: now, time-stamped). Only new or changed values are written. Returns rows added."""
+    vintage = _stamp(vintage)
     own = con is None
     con = con or connect()
     added = 0
@@ -90,8 +119,9 @@ def save_snapshot(df: pd.DataFrame, vintage: str | date | None = None, prefix: s
 
 def load_asof(asof: str | date, series: list | None = None, prefix: str = "",
               con: sqlite3.Connection | None = None) -> pd.DataFrame:
-    """Wide DataFrame of the values as they stood on `asof`."""
-    asof = str(pd.Timestamp(asof).date())
+    """Wide DataFrame of the values as they stood on `asof` (a date = end of that day,
+    or a timestamp such as a run's run_at)."""
+    asof = _asof(asof)
     own = con is None
     con = con or connect()
     if series is None:
@@ -123,13 +153,15 @@ def vintages(con: sqlite3.Connection | None = None) -> pd.DataFrame:
 
 # ---------------------------------------------------------------- nowcast log
 def log_run(nc, model_name: str, qe_label: str = "", asof_data: str | None = None,
-            con: sqlite3.Connection | None = None, factor_saar: float | None = None):
+            con: sqlite3.Connection | None = None, factor_saar: float | None = None) -> str:
+    """Append one nowcast to `runs`; returns its run_at (the key for log_news)."""
     own = con is None
     con = con or connect()
+    run_at = datetime.now().isoformat(timespec="seconds")
     con.execute("INSERT INTO runs (run_at, target, model, asof_data, saar, qoq, demand_saar, "
                 "supply_saar, contributions, observed, qe_label, factor_saar) "
                 "VALUES (?,?,?,?,?,?,?,?,?,?,?,?)", (
-        datetime.now().isoformat(timespec="seconds"), str(nc.quarter.date()), model_name,
+        run_at, str(nc.quarter.date()), model_name,
         asof_data, float(nc.saar), float(nc.qoq),
         float(getattr(nc, "demand_saar", np.nan)), float(getattr(nc, "supply_saar", np.nan)),
         json.dumps({k: round(float(v), 4) for k, v in nc.contributions.items()}, ensure_ascii=False),
@@ -138,14 +170,72 @@ def log_run(nc, model_name: str, qe_label: str = "", asof_data: str | None = Non
     con.commit()
     if own:
         con.close()
+    return run_at
 
 
-def last_run_before(target, before, con: sqlite3.Connection | None = None):
-    """Most recent logged run for `target` on an earlier calendar day than `before`."""
+def log_news(run_at: str, target, model_name: str, basis: str, news_df: pd.DataFrame | None,
+             con: sqlite3.Connection | None = None):
+    """Store a news decomposition (columns 統計, 寄与; the 合計 row is skipped) for one run."""
+    own = con is None
+    con = con or connect()
+    con.execute("DELETE FROM news WHERE run_at=? AND model=?", (run_at, model_name))
+    rows = []
+    if news_df is not None:
+        rows = [(run_at, str(pd.Timestamp(target).date()), model_name, basis, str(i), float(v))
+                for i, v in zip(news_df["統計"], news_df["寄与"]) if i != "合計"]
+    if not rows:  # keep a marker so the history shows why there is no breakdown
+        rows = [(run_at, str(pd.Timestamp(target).date()), model_name, basis, "（内訳なし）", 0.0)]
+    con.executemany("INSERT INTO news VALUES (?,?,?,?,?,?)", rows)
+    con.commit()
+    if own:
+        con.close()
+
+
+def news_log(con: sqlite3.Connection | None = None) -> pd.DataFrame:
+    own = con is None
+    con = con or connect()
+    df = pd.read_sql("SELECT * FROM news ORDER BY run_at", con)
+    if own:
+        con.close()
+    return df
+
+
+def arrivals(after, until, con: sqlite3.Connection | None = None) -> pd.DataFrame:
+    """What arrived in the store with vintage in (after, until]: one row per series with
+    the reference dates that are new (never seen before) and those that were revised."""
+    after = _asof(after) if after is not None else "0000-00-00"
+    until = _asof(until)
+    own = con is None
+    con = con or connect()
+    q = """SELECT o.series, o.ref_date,
+                  EXISTS (SELECT 1 FROM obs p WHERE p.series=o.series AND p.ref_date=o.ref_date
+                          AND p.vintage<=?) AS seen,
+                  EXISTS (SELECT 1 FROM obs p WHERE p.series=o.series AND p.vintage<=?) AS series_seen
+           FROM obs o WHERE o.vintage>? AND o.vintage<=?
+           GROUP BY o.series, o.ref_date"""
+    df = pd.read_sql(q, con, params=(after, after, after, until))
+    if own:
+        con.close()
+    if df.empty:
+        return pd.DataFrame(columns=["series", "new", "revised", "new_series"])
+    out = []
+    for s, g in df.groupby("series"):
+        out.append({"series": s,
+                    "new": sorted(g.loc[g.seen == 0, "ref_date"]),
+                    "revised": sorted(g.loc[g.seen == 1, "ref_date"]),
+                    "new_series": not bool(g.series_seen.iloc[0])})
+    return pd.DataFrame(out)
+
+
+def last_run_before(target, before, con: sqlite3.Connection | None = None, model: str | None = None):
+    """Most recent logged run for `target` strictly before `before` (date = start of that day,
+    or a timestamp), optionally for one model."""
     r = runs(target, con=con)
+    if model is not None and not r.empty:
+        r = r[r["model"] == model]
     if r.empty:
         return None
-    r = r[r["run_at"].dt.normalize() < pd.Timestamp(before).normalize()]
+    r = r[r["run_at"] < pd.Timestamp(before)]
     return None if r.empty else r.iloc[-1]
 
 

@@ -88,15 +88,17 @@ def cmd_nowcast(a):
 
     # news decomposition of ① vs the previous run (real vintage) or, if none, a pseudo vintage
     eng = lambda q, m, T: model.nowcast(q, m, T, config=cfg).saar
-    nw, nw_label = None, ""
+    nw, nw_label, prev = None, "", None
     try:
-        prev = None if a.news_from else vintage.last_run_before(str(target.date()), today)
+        now = pd.Timestamp(a.asof) if a.asof else pd.Timestamp.now()
+        mname = a.model + (f"-{a.fill}" if a.fill else "")
+        prev = None if a.news_from else vintage.last_run_before(str(target.date()), now, model=mname)
         if prev is not None:
-            d0 = pd.Timestamp(prev["run_at"]).date()
-            m_old = data.transform_monthly(vintage.load_asof(d0))
-            q_old = vintage.load_asof(d0, prefix="qe:")
+            t0 = pd.Timestamp(prev["run_at"])
+            m_old = data.transform_monthly(vintage.load_asof(t0))
+            q_old = vintage.load_asof(t0, prefix="qe:")
             nw = news.decompose(eng, target, q_old, m_old, qe, monthly)
-            nw_label = f"{d0:%-m/%-d}→{today:%-m/%-d}"
+            nw_label = f"{t0:%-m/%-d %H:%M}→{now:%-m/%-d %H:%M}"
         else:
             from .release import update_dates
             if a.news_from:
@@ -113,11 +115,21 @@ def cmd_nowcast(a):
         print(f"[news] failed: {ex}")
 
     if not a.asof and not a.no_save:
-        vintage.log_run(nc, a.model + (f"-{a.fill}" if a.fill else ""), qe_label=label,
-                        factor_saar=None if fnc is None else fnc.saar)
-        # human-readable record next to the DB (diff-friendly in git)
+        mname = a.model + (f"-{a.fill}" if a.fill else "")
+        run_at = vintage.log_run(nc, mname, qe_label=label,
+                                 factor_saar=None if fnc is None else fnc.saar)
+        basis = ("初回" if nw is None else
+                 f"前回 {pd.Timestamp(prev['run_at']).isoformat(timespec='seconds')}" if prev is not None
+                 else f"再構成 {nw_label}")
+        vintage.log_news(run_at, target, mname, basis, nw)
+        # human-readable records next to the DB (diff-friendly in git)
         vintage.runs().to_csv(os.path.join(vintage.home(), "runs.csv"), index=False,
                               encoding="utf-8-sig")
+        try:
+            from . import history
+            print(f"[history] {history.build(a.model)}")
+        except Exception as ex:
+            print(f"[history] failed: {ex}")
     if a.out:
         os.makedirs(a.out, exist_ok=True)
         stamp = str(today.date()).replace("-", "")

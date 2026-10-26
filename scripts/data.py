@@ -275,6 +275,7 @@ TERT_SERIES = {"K1D000000I": "tert_total",      # 第3次産業総合
                "SBC0000I": "tert_business"}     # 広義対事業所サービス
 
 
+@lru_cache(maxsize=None)
 def _meti_get(name: str, base: str = METI_TERT_BASE) -> bytes:
     """METI file download; the CDN sometimes answers 202 with an empty body -> retry."""
     req = urllib.request.Request(base + name,
@@ -352,6 +353,56 @@ def get_supply_monthly() -> pd.DataFrame:
     return df.astype(float)
 
 
+# 鉱工業指数（経産省, 財別 季調済）で、景気動向指数（CI）経由の同じ系列を先取りする。
+# CIの個別系列は経産省の値をそのまま転記したもの（2018年以降の水準は一致）だが、
+# CI速報・改訂の公表を待つため反映が約1〜2週間遅れる（例: 8月分確報は経産省10/15, CI改訂10/26）。
+IIP_METI = {  # model series -> (sheet, code)
+    "iip": ("生産", "3000000000"),               # 鉱工業生産（CI C1）
+    "prod_goods_ship": ("出荷", "3200000100"),   # 鉱工業用生産財出荷（CI C2）
+    "durable_ship": ("出荷", "3100020100"),      # 耐久消費財出荷（CI C3）
+}
+# 投資財出荷（除．輸送機械）（CI C5）= 資本財（除．輸送機械）と建設財の出荷をウェイトで合成
+IIP_INVEST_PARTS = ("3100010200", "3100010300")
+IIP_RECENT_MONTHS = 3   # invest_goods: METI-based values replace CI only for the latest months
+
+
+def get_iip_meti() -> pd.DataFrame:
+    """経産省 鉱工業指数（2018-, 季調済）から iip / prod_goods_ship / durable_ship / invest_goods."""
+    x = pd.ExcelFile(io.BytesIO(_meti_get(METI_IIP_LATEST, METI_IIP_BASE)))
+    sheets = {s: pd.read_excel(x, s, header=None) for s in ("生産", "出荷")}
+
+    def row(sheet, code):
+        a = sheets[sheet]
+        r = a[a[0].astype(str) == code]
+        months = a.iloc[2, 3:].astype(int).astype(str)
+        return pd.to_numeric(pd.Series(r.iloc[0, 3:].values,
+                                       index=pd.to_datetime(months.values, format="%Y%m")),
+                             errors="coerce"), float(r.iloc[0, 2])
+
+    out = {k: row(*v)[0] for k, v in IIP_METI.items()}
+    (a, wa), (b, wb) = (row("出荷", c) for c in IIP_INVEST_PARTS)
+    out["invest_goods"] = ((wa * a + wb * b) / (wa + wb)).round(1)
+    return pd.DataFrame(out).astype(float)
+
+
+def _merge_iip_meti(df: pd.DataFrame, meti: pd.DataFrame) -> pd.DataFrame:
+    """METI values take priority (they are published first); CI history is kept elsewhere.
+    invest_goods is a reconstruction (±0.1 rounding vs CI), so it only overrides recent months."""
+    df = df.copy()
+    for c in meti.columns:
+        m = meti[c].dropna()
+        if c not in df:
+            df[c] = m
+            continue
+        if c == "invest_goods":
+            last_ci = df[c].last_valid_index()
+            start = (last_ci - pd.offsets.MonthBegin(IIP_RECENT_MONTHS - 1)) if last_ci is not None else m.index.min()
+            m = m[m.index >= start]
+        df = df.reindex(df.index.union(m.index))
+        df.loc[m.index, c] = m.values
+    return df
+
+
 def get_monthly_raw(extended: bool = True) -> pd.DataFrame:
     """Source values as published (what the vintage store saves)."""
     parts = [get_cai(), get_real_trade(), get_esri_monthly()]
@@ -362,7 +413,12 @@ def get_monthly_raw(extended: bool = True) -> pd.DataFrame:
                 parts.append(fn())
             except Exception as ex:  # keep the core model running if one source fails
                 print(f"[jp-gdpnow] warning: {fn.__name__} failed: {ex}", file=sys.stderr)
-    return pd.concat(parts, axis=1).sort_index()
+    df = pd.concat(parts, axis=1).sort_index()
+    try:
+        df = _merge_iip_meti(df, get_iip_meti())
+    except Exception as ex:  # fall back to the CI-based values
+        print(f"[jp-gdpnow] warning: get_iip_meti failed: {ex}", file=sys.stderr)
+    return df.sort_index()
 
 
 def transform_monthly(raw: pd.DataFrame) -> pd.DataFrame:

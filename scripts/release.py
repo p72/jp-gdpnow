@@ -14,8 +14,8 @@ RELEASE_LAG = {
     "real_imports": (1, 23),
     "cai_real": (2, 8),          # 日銀 消費活動指数: 原則 第5営業日
     "housing_starts": (2, 8),    # CI速報経由（住宅着工そのものは翌月末）
-    "invest_goods": (2, 8),      # CI速報経由（鉱工業指数速報は翌月末）
-    "iip": (2, 8),
+    "invest_goods": (1, 28),     # 経産省 鉱工業指数速報（翌月末。9月分=10/30）
+    "iip": (1, 28),
     "machine_orders": (2, 15),   # 機械受注（翌々月中旬）
     "services_credit": (2, 10),  # 国際収支速報（季調値）
     "services_debit": (2, 10),
@@ -25,7 +25,8 @@ RELEASE_LAG = {
     "real_ex_capital": (1, 23),
     # extra CI component series (factor engine): via CI速報
     "new_job_offers": (2, 8), "consumer_conf": (2, 8), "sme_sales_di": (2, 8),
-    "prod_goods_ship": (2, 8), "durable_ship": (2, 8), "jobs_ratio": (2, 8),
+    "prod_goods_ship": (1, 28), "durable_ship": (1, 28),  # 経産省 鉱工業指数速報
+    "jobs_ratio": (2, 8),
     "export_volume": (2, 8),
     "inv_ratio_final": (2, 8), "inv_ratio_prod": (2, 8),
     "bop_goods_ex": (2, 10), "bop_goods_im": (2, 10),

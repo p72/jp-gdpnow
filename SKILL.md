@@ -270,3 +270,11 @@ d2 は2016–19で大きく改善するが、QE1直前（d4）の2021–26で悪
 - 日銀 実質輸出入: https://www.boj.or.jp/research/research_data/reri/index.htm
 - 日銀 消費活動指数: https://www.boj.or.jp/research/research_data/cai/index.htm
 - 参考 アトランタ連銀 GDPNow: https://www.atlantafed.org/research-and-data/data/gdpnow
+
+## 運用ログ（2026-10-26 追加）
+- 鉱工業系列（`iip`, `invest_goods`, `prod_goods_ship`, `durable_ship`）は `data.get_iip_meti()` で経産省の鉱工業指数から先取り
+  （景気動向指数経由だと速報・確報の反映が1〜2週間遅れるため。過去値はCIと一致を確認、`invest_goods` は資本財（除輸送）と建設財の
+  出荷をウェイト合成し直近3か月だけ置き換え）。公表ラグ (1,28)。d1〜d4 のバックテスト時点では従来と同じ月まで見えるので検証結果は不変。
+- ヴィンテージは時刻付き（`YYYY-MM-DDTHH:MM:SS`）で保存。`load_asof(日付)` はその日の終わり時点、`load_asof(run_at)` はその記録時点。
+- 記録のたびに、前回の記録（同じモデル）からのニュース分解を `news` テーブルと `data/news_log.csv` に、
+  人が読む表を `data/HISTORY.md` に出力（`scripts/history.py`。`python -m scripts.history --backfill` で欠けた回を再計算）。

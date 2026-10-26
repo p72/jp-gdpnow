@@ -9,6 +9,8 @@
 
 ![最新のレポート](output/latest.png)
 
+**予想の変化の記録**（いつ・どの統計で・どれだけ動いたか）→ [data/HISTORY.md](data/HISTORY.md)
+
 ## 2つのエンジン
 - **① QE1予想**：需要項目別のブリッジ方程式の積み上げと、供給側（鉱工業生産＋労働投入）を 50:50 で合成（モデル v3）
 - **② 景気因子**：月次16系列と四半期GDPの混合頻度ダイナミック・ファクター・モデル
@@ -40,7 +42,7 @@ python -m scripts.cli history                       # 記録した予想の推�
 | `scripts/` | モデル本体（data, model, factor, release, news, bands, vintage, plots, cli ほか） |
 | `scripts/schedule.csv` | 今後の公表予定（手で更新する。四半期ごとに次の期の日程を追加） |
 | `vendor/` | データ取得に使う esri-data・boj-api・estat-api スキルのモジュール（同梱コピー） |
-| `data/` | ヴィンテージDBと予想の記録 `runs.csv` |
+| `data/` | ヴィンテージDB、予想の記録 `runs.csv`、変化の記録 `HISTORY.md`、ニュース分解の記録 `news_log.csv` |
 | `output/` | レポート画像（`latest.png` が最新）と内訳CSV |
 | `SKILL.md` | 設計・検証結果・不採用案の記録 |
 
