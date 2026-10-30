@@ -278,3 +278,7 @@ d2 は2016–19で大きく改善するが、QE1直前（d4）の2021–26で悪
 - ヴィンテージは時刻付き（`YYYY-MM-DDTHH:MM:SS`）で保存。`load_asof(日付)` はその日の終わり時点、`load_asof(run_at)` はその記録時点。
 - 記録のたびに、前回の記録（同じモデル）からのニュース分解を `news` テーブルと `data/news_log.csv` に、
   人が読む表を `data/HISTORY.md` に出力（`scripts/history.py`。`python -m scripts.history --backfill` で欠けた回を再計算）。
+- 経産省の表は速報月の見出しが「p 202609」の形になる → `data._meti_months` で数字6桁を取り出す
+  （2026-10-30 の9月速報で取り込みに失敗し、景気動向指数経由の値に戻っていた。10/31 修正）。
+- `data/HISTORY.md` は要約表（記録ごとの予想・変化・要因）＋各回に入ったデータの明細
+  （統計名・指標名・対象月・値・前期比・改定前の値・単位）。系列の表示名は `history.SERIES`。

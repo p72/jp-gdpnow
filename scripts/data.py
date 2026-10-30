@@ -289,6 +289,14 @@ def _meti_get(name: str, base: str = METI_TERT_BASE) -> bytes:
     raise RuntimeError(f"METI download failed: {name}")
 
 
+def _meti_months(row: pd.Series) -> pd.Series:
+    """METI header cells are 202608 or, for preliminary figures, 'p 202609' -> '202609'."""
+    m = row.astype(str).str.extract(r"(\d{6})")[0]
+    if m.isna().any():
+        raise ValueError(f"unexpected METI month header: {list(row[m.isna()])[:3]}")
+    return m
+
+
 # 鉱工業指数 財別（経産省, 季調済, 2020=100）: 出荷 and 在庫 by goods class
 METI_IIP_BASE = "https://www.meti.go.jp/statistics/tyo/iip/xls/"
 METI_IIP_LATEST = "b2020_zsm1j.xlsx"   # 2018- (sheets 生産/出荷/在庫/在庫率)
@@ -314,7 +322,7 @@ def get_iip_goods() -> pd.DataFrame:
     for (sheet, code), name in IIP_GOODS.items():
         a = pd.read_excel(new_x, sheet, header=None)
         row = a[a[0].astype(str) == code]
-        months = a.iloc[2, 3:].astype(int).astype(str)
+        months = _meti_months(a.iloc[2, 3:])
         latest = pd.Series(row.iloc[0, 3:].values, index=pd.to_datetime(months.values, format="%Y%m"))
         b = pd.read_excel(old_x, sheet, header=None)
         j = [k for k in range(2, b.shape[1]) if str(b.iloc[1, k]) == code][0]
@@ -330,7 +338,7 @@ def get_tertiary() -> pd.DataFrame:
     """第3次産業活動指数（季調済, 2020年基準）: 総合・広義対個人・広義対事業所.
     1988-2017 from the linked index, 2018- from the latest file (identical on overlap)."""
     new = pd.read_excel(io.BytesIO(_meti_get(METI_TERT_LATEST)), sheet_name="ITA", header=None)
-    months = new.iloc[2, 3:].astype(int).astype(str)
+    months = _meti_months(new.iloc[2, 3:])
     body = new[new[0].isin(TERT_SERIES)].set_index(0).iloc[:, 2:]
     body.columns = pd.to_datetime(months.values, format="%Y%m")
     latest = body.T.rename(columns=TERT_SERIES)
@@ -374,7 +382,7 @@ def get_iip_meti() -> pd.DataFrame:
     def row(sheet, code):
         a = sheets[sheet]
         r = a[a[0].astype(str) == code]
-        months = a.iloc[2, 3:].astype(int).astype(str)
+        months = _meti_months(a.iloc[2, 3:])
         return pd.to_numeric(pd.Series(r.iloc[0, 3:].values,
                                        index=pd.to_datetime(months.values, format="%Y%m")),
                              errors="coerce"), float(r.iloc[0, 2])

@@ -248,3 +248,28 @@ def runs(target: str | None = None, con: sqlite3.Connection | None = None) -> pd
         con.close()
     df["run_at"] = pd.to_datetime(df["run_at"])
     return df
+
+
+def arrival_values(after, until, con: sqlite3.Connection | None = None) -> pd.DataFrame:
+    """Values that arrived with vintage in (after, until]: series, ref_date, value (as of
+    `until`), old (as of `after`, NaN if new), prev (the previous period's value as of `until`,
+    for a growth rate), new_series (series not in the store before)."""
+    lo = _asof(after) if after is not None else "0000-00-00"
+    hi = _asof(until)
+    own = con is None
+    con = con or connect()
+    keys = con.execute("SELECT DISTINCT series, ref_date FROM obs WHERE vintage>? AND vintage<=?",
+                       (lo, hi)).fetchall()
+    out, cache = [], {}
+    for s, ref in keys:
+        if s not in cache:
+            cache[s] = (_latest(con, s, hi), _latest(con, s, lo))
+        now, before = cache[s]
+        refs = sorted(now)
+        i = refs.index(ref) if ref in now else -1
+        out.append({"series": s, "ref_date": ref, "value": now.get(ref),
+                    "old": before.get(ref), "prev": now.get(refs[i - 1]) if i > 0 else None,
+                    "new_series": not before})
+    if own:
+        con.close()
+    return pd.DataFrame(out, columns=["series", "ref_date", "value", "old", "prev", "new_series"])
