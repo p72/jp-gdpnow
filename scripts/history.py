@@ -189,6 +189,9 @@ def build(model: str = "v3", out_dir: str | None = None) -> str:
              "各回の下の表は、前回の記録から今回までに入ったデータ（新しい月の値と改定）。前期比は前の月（QEは前の期）からの変化率、"
              "製造工業生産予測指数は値そのものが前月比の見込み。",
              "記録の日時は自動実行の時刻で、GitHub の混雑により統計の公表日より遅れることがある。", ""]
+    # previous run of any quarter: the first run of a new quarter still lists what arrived
+    # since the last record (e.g. the QE1 that switched the target)
+    prev_any = dict(zip(runs["run_at"], [None] + list(runs["run_at"].iloc[:-1])))
     for target, g in list(runs.groupby("target", sort=False))[::-1]:
         lines += [f"## {_qlabel(target)}", "",
                   "| 記録日時 | ① QE1予想 | 変化 | ② 景気因子 | 主な要因（①への寄与） | 入ったデータ |",
@@ -204,14 +207,17 @@ def build(model: str = "v3", out_dir: str | None = None) -> str:
                 "初回" if prev is None else "変化なし")
             change = "—" if prev is None else f"{r['saar'] - prev_saar:+.2f}"
             fac = "" if pd.isna(r.get("factor_saar")) else f"{r['factor_saar']:+.2f}%"
-            if prev is None:
+            p_any = prev_any.get(run_at)
+            if p_any is None:
                 got, det = "初回（全データ取得）", []
             else:
-                got = describe_arrivals(vintage.arrivals(prev, run_at, con=con))
-                det = detail_table(vintage.arrival_values(prev, run_at, con=con))
+                got = describe_arrivals(vintage.arrivals(p_any, run_at, con=con))
+                det = detail_table(vintage.arrival_values(p_any, run_at, con=con))
+                if prev is None:
+                    got = f"この期の初回（前回 {p_any:%m/%d} の記録以降）：" + got
             rows.append(f"| {run_at:%Y-%m-%d %H:%M} | {r['saar']:+.2f}% | {change} | {fac} | {drivers} | {got} |")
             head = f"### {run_at:%Y-%m-%d %H:%M}　① {r['saar']:+.2f}%（{change}）"
-            details.append([head, ""] + (det or ["入ったデータなし" if prev is not None else "初回（全データ取得）"]) + [""])
+            details.append([head, ""] + (det or ["入ったデータなし" if p_any is not None else "初回（全データ取得）"]) + [""])
             prev, prev_saar = run_at, r["saar"]
         lines += rows[::-1] + ["", "### 各回に入ったデータ", ""]
         for d in details[::-1]:
